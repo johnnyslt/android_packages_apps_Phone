@@ -71,6 +71,12 @@ import com.android.internal.telephony.cdma.TtyIntent;
 import com.android.phone.OtaUtils.CdmaOtaScreenState;
 import com.android.server.sip.SipService;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+
 /**
  * Global state for the telephony subsystem when running in the primary
  * phone process.
@@ -256,6 +262,54 @@ public class PhoneGlobals extends ContextWrapper
     private int mPreferredTtyMode = Phone.TTY_MODE_OFF;
 
     /**
+     * sweep2wake workaround
+     */
+    private static boolean mSweep2WakeCapable = false;
+    private String mSweep2WakeState;
+    private static final String SWEEP2WAKE_FILE = "/sys/android_touch/sweep2wake";
+
+    private static void checkSweep2WakeCapability () {
+        if (new File(SWEEP2WAKE_FILE).exists()) {
+            mSweep2WakeCapable = true;
+        }
+    }
+
+    private static String getSweep2WakeState() {
+        BufferedReader br;
+        String state = null;
+
+        try {
+            br = new BufferedReader(new FileReader(SWEEP2WAKE_FILE), 512);
+            try {
+                state = br.readLine();
+            } finally {
+                br.close();
+            }
+        } catch (Exception e) {
+            Log.e(LOG_TAG, "I/O exception while reading sweep2wake file", e);
+        }
+        return state;
+    }
+
+    private static boolean setSweep2WakeState(String state) {
+        try {
+            FileWriter fw = new FileWriter("/sys/android_touch/sweep2wake");
+            try {
+                fw.write(state + "\n");
+            } finally {
+                fw.close();
+            }
+
+        } catch (IOException e) {
+            Log.e(LOG_TAG, "I/O exception while writing to sweep2wake file", e);
+            return false;
+        }
+        return true;
+    }
+
+
+
+    /**
      * Set the restore mute state flag. Used when we are setting the mute state
      * OUTSIDE of user interaction {@link PhoneUtils#startNewCall(Phone)}
      */
@@ -439,6 +493,9 @@ public class PhoneGlobals extends ContextWrapper
         // feature" instead, in which case we'd do something like:
         // sVoiceCapable =
         //   getPackageManager().hasSystemFeature(PackageManager.FEATURE_TELEPHONY_VOICE_CALLS);
+
+        // Check if sweep2wake is valid option
+        checkSweep2WakeCapability();
 
         if (phone == null) {
             // Initialize the telephony framework
@@ -1168,6 +1225,12 @@ public class PhoneGlobals extends ContextWrapper
                     // Phone is in use!  Arrange for the screen to turn off
                     // automatically when the sensor detects a close object.
                     if (!mProximityWakeLock.isHeld()) {
+                        if (mSweep2WakeCapable) {
+                            mSweep2WakeState = getSweep2WakeState();
+                            if (DBG) Log.d(LOG_TAG, "Got sweep2wake state");
+                            // Disable sweep2wake
+                            setSweep2WakeState("0");
+                        }
                         if (DBG) Log.d(LOG_TAG, "updateProximitySensorMode: acquiring...");
                         mProximityWakeLock.acquire();
                     } else {
@@ -1177,6 +1240,13 @@ public class PhoneGlobals extends ContextWrapper
                     // Phone is either idle, or ringing.  We don't want any
                     // special proximity sensor behavior in either case.
                     if (mProximityWakeLock.isHeld()) {
+                        if (mSweep2WakeCapable) {
+                            if (mSweep2WakeState != null && setSweep2WakeState(mSweep2WakeState)) {
+                                Log.d(LOG_TAG, "Restored sweep2wake state");
+                            } else {
+                                Log.d(LOG_TAG, "Failed to restore sweep2wake state");
+                            }
+                        }
                         if (DBG) Log.d(LOG_TAG, "updateProximitySensorMode: releasing...");
                         // Wait until user has moved the phone away from his head if we are
                         // releasing due to the phone call ending.
