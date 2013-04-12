@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006 The Android Open Source Project
+ * Blacklist - Copyright (C) 2013 The CyanogenMod Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +19,7 @@ package com.android.phone;
 
 import android.app.Activity;
 import android.app.KeyguardManager;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.ProgressDialog;
 import android.bluetooth.BluetoothAdapter;
@@ -56,6 +58,7 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.util.Slog;
 import android.view.KeyEvent;
+import android.widget.Toast;
 
 import com.android.internal.telephony.Call;
 import com.android.internal.telephony.CallManager;
@@ -173,6 +176,7 @@ public class PhoneGlobals extends ContextWrapper
     CallNotifier notifier;
     NotificationMgr notificationMgr;
     Ringer ringer;
+    Blacklist blackList;
     IBluetoothHeadsetPhone mBluetoothPhone;
     PhoneInterfaceManager phoneMgr;
     CallManager mCM;
@@ -260,6 +264,12 @@ public class PhoneGlobals extends ContextWrapper
     private boolean mTtyEnabled;
     // Current TTY operating mode selected by user
     private int mPreferredTtyMode = Phone.TTY_MODE_OFF;
+
+    // For adding to Blacklist from call log
+    private static final String INSERT_BLACKLIST = "com.android.phone.INSERT_BLACKLIST";
+    public static final String REMOVE_BLACKLIST = "com.android.phone.REMOVE_BLACKLIST";
+    public static final String EXTRA_NUMBER = "number";
+    public static final int BL_NOTIFICATION_ID = 19991; // just something random
 
     /**
      * sweep2wake workaround
@@ -540,6 +550,8 @@ public class PhoneGlobals extends ContextWrapper
 
             ringer = Ringer.init(this);
 
+            blackList = new Blacklist(this);
+
             // before registering for phone state changes
             mPowerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
             mWakeLock = mPowerManager.newWakeLock(PowerManager.FULL_WAKE_LOCK, LOG_TAG);
@@ -624,6 +636,8 @@ public class PhoneGlobals extends ContextWrapper
                 intentFilter.addAction(TtyIntent.TTY_PREFERRED_MODE_CHANGE_ACTION);
             }
             intentFilter.addAction(AudioManager.RINGER_MODE_CHANGED_ACTION);
+            intentFilter.addAction(INSERT_BLACKLIST);
+            intentFilter.addAction(REMOVE_BLACKLIST);
             registerReceiver(mReceiver, intentFilter);
 
             // Use a separate receiver for ACTION_MEDIA_BUTTON broadcasts,
@@ -1588,6 +1602,13 @@ public class PhoneGlobals extends ContextWrapper
                 if (ringerMode == AudioManager.RINGER_MODE_SILENT) {
                     notifier.silenceRinger();
                 }
+            } else if (action.equals(INSERT_BLACKLIST)) {
+                blackList.add(intent.getStringExtra(EXTRA_NUMBER));
+            } else if (action.equals(REMOVE_BLACKLIST)) {
+                // Dismiss the notification that brought us here and remove the number from the list
+                NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+                nm.cancel(BL_NOTIFICATION_ID);
+                blackList.delete(intent.getStringExtra(EXTRA_NUMBER));
             }
         }
     }
